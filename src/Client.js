@@ -1586,7 +1586,10 @@ class Client extends EventEmitter {
                     participantWids
                 );
             } catch (err) {
-                return 'CreateGroupError: An unknown error occupied while creating a group';
+                const errorMsg =
+                    'CreateGroupError: ' +
+                    ((err && (err.message || err.text)) ? (err.message || err.text) : 'An unknown error occupied while creating a group');
+                return errorMsg;
             }
 
             for (const participant of createGroupResult.participants) {
