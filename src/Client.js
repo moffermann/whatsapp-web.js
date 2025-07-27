@@ -1538,9 +1538,20 @@ class Client extends EventEmitter {
      * @returns {Promise<CreateGroupResult|string>} Object with resulting data or an error message as a string
      */
     async createGroup(title, participants = [], options = {}) {
-        !Array.isArray(participants) && (participants = [participants]);
-        participants.map(p => (p instanceof Contact) ? p.id._serialized : p);
-
+        if (!Array.isArray(participants)) {
+            participants = [participants];
+        }
+        participants = participants.map(p => {
+            if (p && typeof p !== 'string' && p.id && p.id._serialized) {
+                return p.id._serialized;
+            }
+            if (typeof p === 'string') {
+                return p;
+            }
+            return null;
+        }).filter(jid => typeof jid === 'string' && jid.trim().length > 0);
+        console.log('🛠️ Participants limpios antes de crear grupo:', participants);
+        throw new Error('DEBUG createGroup params: ' + `title=${title} | ` +`participants=${JSON.stringify(participants)} | ` + `options=${JSON.stringify(options)}`);
         return await this.pupPage.evaluate(async (title, participants, options) => {
             const { messageTimer = 0, parentGroupId, autoSendInviteV4 = true, comment = '' } = options;
             const participantData = {}, participantWids = [], failedParticipants = [];
@@ -1577,7 +1588,8 @@ class Client extends EventEmitter {
                     participantWids
                 );
             } catch (err) {
-                return 'CreateGroupError: An unknown error occupied while creating a group';
+                throw err;
+                //return 'CreateGroupError: An unknown error occupied while creating a group';
             }
 
             for (const participant of createGroupResult.participants) {
