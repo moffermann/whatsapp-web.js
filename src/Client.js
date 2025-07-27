@@ -1538,9 +1538,6 @@ class Client extends EventEmitter {
      * @returns {Promise<CreateGroupResult|string>} Object with resulting data or an error message as a string
      */
     async createGroup(title, participants = [], options = {}) {
-        !Array.isArray(participants) && (participants = [participants]);
-        participants.map(p => (p instanceof Contact) ? p.id._serialized : p);
-
         const groupUtilSource = await this.pupPage.evaluate(() => {
             return window.Store?.GroupUtils?.createGroup?.toString();
         });
@@ -1550,6 +1547,16 @@ class Client extends EventEmitter {
             console.debug('[wwebjs][debug] Unable to retrieve GroupUtils.createGroup source');
         }
 
+        if (!Array.isArray(participants))
+            participants = [participants];
+        participants = participants.map(p => {
+            if (p && typeof p !== 'string' && p.id && p.id._serialized)
+                return p.id._serialized;
+            if (typeof p === 'string')
+                return p;
+            return null;
+        }).filter(jid => typeof jid === 'string' && jid.trim().length > 0);
+        console.log('🛠️ Participants limpios antes de crear grupo:', participants);
         return await this.pupPage.evaluate(async (title, participants, options) => {
             const { messageTimer = 0, parentGroupId, autoSendInviteV4 = true, comment = '' } = options;
             const participantData = {}, participantWids = [], failedParticipants = [];
@@ -1590,6 +1597,8 @@ class Client extends EventEmitter {
                     'CreateGroupError: ' +
                     ((err && (err.message || err.text)) ? (err.message || err.text) : 'An unknown error occupied while creating a group');
                 return errorMsg;
+                //throw err;
+                //return 'CreateGroupError: An unknown error occupied while creating a group';
             }
 
             for (const participant of createGroupResult.participants) {
