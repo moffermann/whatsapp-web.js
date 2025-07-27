@@ -1541,6 +1541,15 @@ class Client extends EventEmitter {
         !Array.isArray(participants) && (participants = [participants]);
         participants.map(p => (p instanceof Contact) ? p.id._serialized : p);
 
+        const groupUtilSource = await this.pupPage.evaluate(() => {
+            return window.Store?.GroupUtils?.createGroup?.toString();
+        });
+        if (groupUtilSource) {
+            console.debug('[wwebjs][debug] window.Store.GroupUtils.createGroup source:\n' + groupUtilSource);
+        } else {
+            console.debug('[wwebjs][debug] Unable to retrieve GroupUtils.createGroup source');
+        }
+
         return await this.pupPage.evaluate(async (title, participants, options) => {
             const { messageTimer = 0, parentGroupId, autoSendInviteV4 = true, comment = '' } = options;
             const participantData = {}, participantWids = [], failedParticipants = [];
