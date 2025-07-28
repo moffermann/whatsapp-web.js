@@ -138,6 +138,9 @@ declare namespace WAWebJS {
         /** Returns the version of WhatsApp Web currently being run */
         getWWebVersion(): Promise<string>
 
+        /** Returns the raw source of WhatsApp Web's internal GroupUtils.createGroup implementation */
+        getCreateGroupSource(): Promise<string | null>
+
         /** Sets up events and requirements, kicks off authentication request */
         initialize(): Promise<void>
 
