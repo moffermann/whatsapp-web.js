@@ -18,6 +18,7 @@ const WebCacheFactory = require('./webCache/WebCacheFactory');
 const { Broadcast, Buttons, Call, ClientInfo, Contact, GroupNotification, Label, List, Location, Message, MessageMedia, Poll, PollVote, Reaction } = require('./structures');
 const NoAuth = require('./authStrategies/NoAuth');
 const {exposeFunctionIfAbsent} = require('./util/Puppeteer');
+const uiCreateGroup = require('./util/uiCreateGroup');
 
 /**
  * Starting point for interacting with the WhatsApp Web API
@@ -1556,127 +1557,95 @@ class Client extends EventEmitter {
      * @returns {Promise<CreateGroupResult|string>} Object with resulting data or an error message as a string
      */
     async createGroup(title, participants = [], options = {}) {
-        const groupUtilSource = await this.pupPage.evaluate(() => {
-            return window.Store?.GroupUtils?.createGroup?.toString();
-        });
-        if (groupUtilSource) {
-            console.debug('[wwebjs][debug] window.Store.GroupUtils.createGroup source:\n' + groupUtilSource);
-        } else {
-            console.debug('[wwebjs][debug] Unable to retrieve GroupUtils.createGroup source');
-        }
+        // 1) Normalizo participants en Node
+        if (!Array.isArray(participants)) participants = [participants];
+        participants = participants
+            .map(p => (p && typeof p !== 'string' && p.id && p.id._serialized)
+                ? p.id._serialized
+                : (typeof p === 'string' ? p : null)
+            )
+            .filter(jid => typeof jid === 'string' && jid.trim());
 
-        if (!Array.isArray(participants))
-            participants = [participants];
-        participants = participants.map(p => {
-            if (p && typeof p !== 'string' && p.id && p.id._serialized)
-                return p.id._serialized;
-            if (typeof p === 'string')
-                return p;
-            return null;
-        }).filter(jid => typeof jid === 'string' && jid.trim().length > 0);
-        console.log('🛠️ Participants limpios antes de crear grupo:', participants);
-        return await this.pupPage.evaluate(async (title, participants, options) => {
-            const { messageTimer = 0, parentGroupId, autoSendInviteV4 = true, comment = '' } = options;
-            const participantData = {}, participantWids = [], failedParticipants = [];
-            let createGroupResult, parentGroupWid;
+        // 2) Rellenar options con valores por defecto
+        options = {
+            memberAddMode:          options.memberAddMode          ?? true,
+            membershipApprovalMode: options.membershipApprovalMode ?? false,
+            announce:               options.announce               ?? true,
+            messageTimer:           options.messageTimer           ?? 0,
+            parentGroupId:          options.parentGroupId          ?? undefined,
+            restrict:               options.restrict               ?? true,
+            ...options
+        };
 
-            console.debug('[wwebjs][debug] createGroup called with:', {title, participants, options});
-
-            const addParticipantResultCodes = {
-                default: 'An unknown error occupied while adding a participant',
-                200: 'The participant was added successfully',
-                403: 'The participant can be added by sending private invitation only',
-                404: 'The phone number is not registered on WhatsApp'
-            };
-
-            for (const participant of participants) {
-                const pWid = window.Store.WidFactory.createWid(participant);
-                if ((await window.Store.QueryExist(pWid))?.wid) participantWids.push(pWid);
-                else failedParticipants.push(participant);
-            }
-
-            console.debug('[wwebjs][debug] participantWids:', participantWids.map(w => w._serialized));
-            if (failedParticipants.length) {
-                console.debug('[wwebjs][debug] failedParticipants:', failedParticipants);
-            }
-
-            parentGroupId && (parentGroupWid = window.Store.WidFactory.createWid(parentGroupId));
-            if (parentGroupWid) {
-                console.debug('[wwebjs][debug] parentGroupWid:', parentGroupWid.toString());
-            }
-
-            try {
-                console.debug('[wwebjs][debug] Calling window.Store.GroupUtils.createGroup');
-                createGroupResult = await window.Store.GroupUtils.createGroup(
-                    {
-                        'memberAddMode': options.memberAddMode === undefined ? true : options.memberAddMode,
-                        'membershipApprovalMode': options.membershipApprovalMode === undefined ? false : options.membershipApprovalMode,
-                        'announce': options.announce === undefined ? true : options.announce,
-                        'ephemeralDuration': messageTimer,
-                        'full': undefined,
-                        'parentGroupId': parentGroupWid,
-                        'restrict': options.restrict === undefined ? true : options.restrict,
-                        'thumb': undefined,
-                        'title': title,
-                    },
-                    participantWids
-                );
-                console.debug('[wwebjs][debug] createGroupResult:', createGroupResult);
-            } catch (err) {
-                const errorMsg =
-                    'CreateGroupError: ' +
-                    ((err && (err.message || err.text)) ? (err.message || err.text) : 'An unknown error occupied while creating a group');
-                return errorMsg;
-                //throw err;
-                //return 'CreateGroupError: An unknown error occupied while creating a group';
-            }
-
-            for (const participant of createGroupResult.participants) {
-                let isInviteV4Sent = false;
-                const participantId = participant.wid._serialized;
-                const statusCode = participant.error || 200;
-
-                console.debug('[wwebjs][debug] processing participant:', participantId, 'status:', statusCode);
-
-                if (autoSendInviteV4 && statusCode === 403) {
-                    window.Store.Contact.gadd(participant.wid, { silent: true });
-                    const addParticipantResult = await window.Store.GroupInviteV4.sendGroupInviteMessage(
-                        await window.Store.Chat.find(participant.wid),
-                        createGroupResult.wid._serialized,
-                        createGroupResult.subject,
-                        participant.invite_code,
-                        participant.invite_code_exp,
-                        comment,
-                        await window.WWebJS.getProfilePicThumbToBase64(createGroupResult.wid)
-                    );
-                    isInviteV4Sent = window.compareWwebVersions(window.Debug.VERSION, '<', '2.2335.6')
-                        ? addParticipantResult === 'OK'
-                        : addParticipantResult.messageSendResult === 'OK';
+        // 3) DEBUG: serializo lo que llegará al navegador
+        const debugParams = await this.pupPage.evaluate(
+            async (t, parts, opts) => {
+                const participantWids    = [], failedParticipants = [];
+                for (const pid of parts) {
+                    const w = window.Store.WidFactory.createWid(pid);
+                    const exist = await window.Store.QueryExist(w);
+                    exist?.wid ? participantWids.push(w) : failedParticipants.push(pid);
                 }
-
-                participantData[participantId] = {
-                    statusCode: statusCode,
-                    message: addParticipantResultCodes[statusCode] || addParticipantResultCodes.default,
-                    isGroupCreator: participant.type === 'superadmin',
-                    isInviteV4Sent: isInviteV4Sent
+                return {
+                    title: t,
+                    participants: parts,
+                    options: opts,
+                    participantWids: participantWids.map(w => w._serialized),
+                    failedParticipants
                 };
-                console.debug('[wwebjs][debug] participantData updated for', participantId, participantData[participantId]);
-            }
+            },
+            title, participants, options
+        );
+        console.log('[wwebjs][debug] createGroup internal params:', debugParams);
 
-            for (const f of failedParticipants) {
-                participantData[f] = {
-                    statusCode: 404,
-                    message: addParticipantResultCodes[404],
-                    isGroupCreator: false,
-                    isInviteV4Sent: false
-                };
-                console.debug('[wwebjs][debug] failed participant added to data', f);
-            }
+        // 4) Intento oficial dentro del navegador
+        try {
+            const result = await this.pupPage.evaluate(
+                async (t, parts, opts) => {
+                    const participantWids = [];
+                    for (const pid of parts) {
+                        const w = window.Store.WidFactory.createWid(pid);
+                        if ((await window.Store.QueryExist(w))?.wid) participantWids.push(w);
+                    }
+                    const cg = await window.Store.GroupUtils.createGroup({
+                        memberAddMode:          opts.memberAddMode,
+                        membershipApprovalMode: opts.membershipApprovalMode,
+                        announce:               opts.announce,
+                        ephemeralDuration:      opts.messageTimer,
+                        full:                   undefined,
+                        parentGroupId:          opts.parentGroupId
+                                                  ? window.Store.WidFactory.createWid(opts.parentGroupId)
+                                                  : undefined,
+                        restrict:               opts.restrict,
+                        thumb:                  undefined,
+                        title:                  t
+                    }, participantWids);
 
-            console.debug('[wwebjs][debug] returning from createGroup');
-            console.debug('[wwebjs][debug] createGroup return value', { title: title, gid: createGroupResult.wid, participants: participantData });
-            return { title: title, gid: createGroupResult.wid, participants: participantData };
-        }, title, participants, options);
+                    const pd = {};
+                    for (const p of cg.participants) {
+                        pd[p.wid._serialized] = {
+                            statusCode:    p.error || 200,
+                            isGroupCreator: p.type === 'superadmin',
+                            isInviteV4Sent: false
+                        };
+                    }
+                    return { title: cg.subject, gid: cg.wid._serialized, participants: pd };
+                },
+                title, participants, options
+            );
+
+            console.log('[wwebjs][debug] createGroupResult:', result);
+            return result;
+
+        } catch (err) {
+            console.warn('[wwebjs][debug] internal createGroup failed:', err);
+
+            // 5) FALLBACK UI‑AUTOMATION
+            const gid = await uiCreateGroup(this.pupPage, title, participants);
+            if (!gid) throw new Error('UI‑fallback createGroup failed to get gid');
+            console.log('[wwebjs][debug] UI‑fallback created group, gid=', gid);
+            return { title, gid, participants: {} };
+        }
     }
 
     /**
