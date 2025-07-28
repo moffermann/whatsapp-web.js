@@ -1566,6 +1566,8 @@ class Client extends EventEmitter {
             )
             .filter(jid => typeof jid === 'string' && jid.trim());
 
+        const nativeParts = participants.map(jid => ({ lid: jid }));
+
         // 2) Rellenar options con valores por defecto
         options = {
             memberAddMode:          options.memberAddMode          ?? true,
@@ -1581,20 +1583,20 @@ class Client extends EventEmitter {
         const debugParams = await this.pupPage.evaluate(
             async (t, parts, opts) => {
                 const participantWids    = [], failedParticipants = [];
-                for (const pid of parts) {
-                    const w = window.Store.WidFactory.createWid(pid);
+                for (const p of parts) {
+                    const w = window.Store.WidFactory.createWid(p.lid);
                     const exist = await window.Store.QueryExist(w);
-                    exist?.wid ? participantWids.push(w) : failedParticipants.push(pid);
+                    exist?.wid ? participantWids.push({ lid: w }) : failedParticipants.push(p.lid);
                 }
                 return {
                     title: t,
-                    participants: parts,
+                    participants: parts.map(p => p.lid),
                     options: opts,
-                    participantWids: participantWids.map(w => w._serialized),
+                    participantWids: participantWids.map(p => p.lid._serialized),
                     failedParticipants
                 };
             },
-            title, participants, options
+            title, nativeParts, options
         );
         console.log('[wwebjs][debug] createGroup internal params:', debugParams);
 
@@ -1603,9 +1605,9 @@ class Client extends EventEmitter {
             const result = await this.pupPage.evaluate(
                 async (t, parts, opts) => {
                     const participantWids = [];
-                    for (const pid of parts) {
-                        const w = window.Store.WidFactory.createWid(pid);
-                        if ((await window.Store.QueryExist(w))?.wid) participantWids.push(w);
+                    for (const p of parts) {
+                        const w = window.Store.WidFactory.createWid(p.lid);
+                        if ((await window.Store.QueryExist(w))?.wid) participantWids.push({ lid: w });
                     }
                     const cg = await window.Store.GroupUtils.createGroup({
                         memberAddMode:          opts.memberAddMode,
@@ -1631,7 +1633,7 @@ class Client extends EventEmitter {
                     }
                     return { title: cg.subject, gid: cg.wid._serialized, participants: pd };
                 },
-                title, participants, options
+                title, nativeParts, options
             );
 
             console.log('[wwebjs][debug] createGroupResult:', result);
