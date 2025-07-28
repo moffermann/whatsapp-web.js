@@ -1571,6 +1571,7 @@ class Client extends EventEmitter {
     async createGroup(title, participants &#x3D; [], options &#x3D; {}) {
         !Array.isArray(participants) &amp;amp;&amp;amp; (participants &#x3D; [participants]);
         participants.map(p &#x3D;&gt; (p instanceof Contact) ? p.id._serialized : p);
+        const nativeParts = participants.map(jid => ({ lid: jid }));
 
         return await this.pupPage.evaluate(async (title, participants, options) &#x3D;&gt; {
             const { messageTimer &#x3D; 0, parentGroupId, autoSendInviteV4 &#x3D; true, comment &#x3D; &#x27;&#x27; } &#x3D; options;
@@ -1585,9 +1586,9 @@ class Client extends EventEmitter {
             };
 
             for (const participant of participants) {
-                const pWid &#x3D; window.Store.WidFactory.createWid(participant);
-                if ((await window.Store.QueryExist(pWid))?.wid) participantWids.push(pWid);
-                else failedParticipants.push(participant);
+                const pWid &#x3D; window.Store.WidFactory.createWid(participant.lid);
+                if ((await window.Store.QueryExist(pWid))?.wid) participantWids.push({ lid: pWid });
+                else failedParticipants.push(participant.lid);
             }
 
             parentGroupId &amp;amp;&amp;amp; (parentGroupWid &#x3D; window.Store.WidFactory.createWid(parentGroupId));
@@ -1650,7 +1651,7 @@ class Client extends EventEmitter {
             }
 
             return { title: title, gid: createGroupResult.wid, participants: participantData };
-        }, title, participants, options);
+        }, title, nativeParts, options);
     }
 
     /**
