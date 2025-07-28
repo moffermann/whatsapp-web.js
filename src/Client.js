@@ -822,6 +822,16 @@ class Client extends EventEmitter {
     }
 
     /**
+     * Returns the raw source of WhatsApp Web's internal GroupUtils.createGroup implementation
+     * @returns {Promise<string|null>} The function source as a string or null if unavailable
+     */
+    async getCreateGroupSource() {
+        return await this.pupPage.evaluate(() => {
+            return window.Store?.GroupUtils?.createGroup?.toString() || null;
+        });
+    }
+
+    /**
      * Mark as seen for the Chat
      *  @param {string} chatId
      *  @returns {Promise<boolean>} result
