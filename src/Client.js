@@ -302,6 +302,14 @@ class Client extends EventEmitter {
 
         this.pupBrowser = browser;
         this.pupPage = page;
+        // Pipe browser console messages to Node console for easier debugging
+        this.pupPage.on('console', msg => {
+            try {
+                console.log('[PAGE]', msg.text());
+            } catch (err) {
+                // ignore errors in console handler
+            }
+        });
 
         await this.authStrategy.afterBrowserInitialized();
         await this.initWebVersionCache();
@@ -1562,6 +1570,8 @@ class Client extends EventEmitter {
             const participantData = {}, participantWids = [], failedParticipants = [];
             let createGroupResult, parentGroupWid;
 
+            console.debug('[wwebjs][debug] createGroup called with:', {title, participants, options});
+
             const addParticipantResultCodes = {
                 default: 'An unknown error occupied while adding a participant',
                 200: 'The participant was added successfully',
@@ -1575,9 +1585,18 @@ class Client extends EventEmitter {
                 else failedParticipants.push(participant);
             }
 
+            console.debug('[wwebjs][debug] participantWids:', participantWids.map(w => w._serialized));
+            if (failedParticipants.length) {
+                console.debug('[wwebjs][debug] failedParticipants:', failedParticipants);
+            }
+
             parentGroupId && (parentGroupWid = window.Store.WidFactory.createWid(parentGroupId));
+            if (parentGroupWid) {
+                console.debug('[wwebjs][debug] parentGroupWid:', parentGroupWid.toString());
+            }
 
             try {
+                console.debug('[wwebjs][debug] Calling window.Store.GroupUtils.createGroup');
                 createGroupResult = await window.Store.GroupUtils.createGroup(
                     {
                         'memberAddMode': options.memberAddMode === undefined ? true : options.memberAddMode,
@@ -1592,6 +1611,7 @@ class Client extends EventEmitter {
                     },
                     participantWids
                 );
+                console.debug('[wwebjs][debug] createGroupResult:', createGroupResult);
             } catch (err) {
                 const errorMsg =
                     'CreateGroupError: ' +
@@ -1605,6 +1625,8 @@ class Client extends EventEmitter {
                 let isInviteV4Sent = false;
                 const participantId = participant.wid._serialized;
                 const statusCode = participant.error || 200;
+
+                console.debug('[wwebjs][debug] processing participant:', participantId, 'status:', statusCode);
 
                 if (autoSendInviteV4 && statusCode === 403) {
                     window.Store.Contact.gadd(participant.wid, { silent: true });
@@ -1628,6 +1650,7 @@ class Client extends EventEmitter {
                     isGroupCreator: participant.type === 'superadmin',
                     isInviteV4Sent: isInviteV4Sent
                 };
+                console.debug('[wwebjs][debug] participantData updated for', participantId, participantData[participantId]);
             }
 
             for (const f of failedParticipants) {
@@ -1637,8 +1660,11 @@ class Client extends EventEmitter {
                     isGroupCreator: false,
                     isInviteV4Sent: false
                 };
+                console.debug('[wwebjs][debug] failed participant added to data', f);
             }
 
+            console.debug('[wwebjs][debug] returning from createGroup');
+            console.debug('[wwebjs][debug] createGroup return value', { title: title, gid: createGroupResult.wid, participants: participantData });
             return { title: title, gid: createGroupResult.wid, participants: participantData };
         }, title, participants, options);
     }
